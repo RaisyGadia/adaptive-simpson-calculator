@@ -1,17 +1,12 @@
 from flask import Flask, render_template, request, jsonify
 import math
-import sys
-import os
-
-# Add the current directory to path for imports
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 app = Flask(__name__)
 
 def safe_math_function(x, expression):
     """Safe evaluation of mathematical functions"""
     try:
-        # Allowed mathematical functions
+        # Allowed mathematical functions and constants
         allowed_names = {
             'sin': math.sin,
             'cos': math.cos,
@@ -32,12 +27,12 @@ def safe_math_function(x, expression):
         }
         
         # Check for dangerous patterns
-        dangerous = ['__', 'import', 'exec', 'eval', 'compile', 'open', 'file']
+        dangerous = ['__', 'import', 'exec', 'eval', 'compile', 'open', 'file', 'os', 'sys']
         for pattern in dangerous:
             if pattern in expression.lower():
                 return None
         
-        # Evaluate safely
+        # Evaluate safely with no builtins
         result = eval(expression, {"__builtins__": {}}, {**allowed_names, 'x': x})
         return float(result)
     except Exception:
@@ -53,7 +48,8 @@ def adaptive_simpson_rule(a, b, f_expr, tol=1e-6, max_depth=15):
     def recursive_simpson(a, b, tol, depth):
         # Create function wrapper
         def f_eval(x):
-            return safe_math_function(x, f_expr) or 0
+            result = safe_math_function(x, f_expr)
+            return result if result is not None else 0
         
         m = (a + b) / 2
         S = simpson(f_eval, a, b)
@@ -73,7 +69,7 @@ def adaptive_simpson_rule(a, b, f_expr, tol=1e-6, max_depth=15):
     
     try:
         return recursive_simpson(a, b, tol, 0)
-    except:
+    except Exception:
         return None
 
 @app.route('/')
@@ -100,26 +96,34 @@ def adaptive_simpson_route():
             # Calculate result
             result = adaptive_simpson_rule(a, b, function, tolerance)
             
-            if result is None:
-                return jsonify({'success': False, 'error': 'Calculation failed. Check your function.'}), 400
+            if result is None or math.isnan(result) or math.isinf(result):
+                return jsonify({'success': False, 'error': 'Calculation failed. Check your function for singularities.'}), 400
             
             # Calculate exact integral for common functions
             exact = None
             if function == 'x**2':
                 exact = (b**3 - a**3) / 3
+            elif function == 'x**3':
+                exact = (b**4 - a**4) / 4
             elif function == 'sin(x)':
                 exact = -math.cos(b) + math.cos(a)
             elif function == 'cos(x)':
                 exact = math.sin(b) - math.sin(a)
+            elif function == 'exp(x)':
+                exact = math.exp(b) - math.exp(a)
+            
+            error = abs(result - exact) if exact is not None else None
             
             return jsonify({
                 'success': True,
                 'result': result,
                 'exact': exact,
-                'error': abs(result - exact) if exact else None
+                'error': error
             })
+        except ValueError as e:
+            return jsonify({'success': False, 'error': f'Invalid input: {str(e)}'}), 400
         except Exception as e:
-            return jsonify({'success': False, 'error': str(e)}), 400
+            return jsonify({'success': False, 'error': f'Calculation error: {str(e)}'}), 400
     
     return render_template('adaptive_simpson.html')
 
@@ -127,8 +131,8 @@ def adaptive_simpson_route():
 def examples():
     return render_template('examples.html')
 
-# This is required for Vercel
+# Vercel requires this
 app = app
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
