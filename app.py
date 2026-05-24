@@ -1,4 +1,6 @@
 from flask import Flask, render_template, request, jsonify
+# In app.py, you should have:
+from methods.adaptive_simpson import adaptive_simpson
 import math
 
 app = Flask(__name__)
