@@ -1,38 +1,64 @@
 from flask import Flask, render_template, request, jsonify
-# In app.py, you should have:
-from methods.adaptive_simpson import adaptive_simpson
 import math
+import sys
+import os
+
+# Add the current directory to path for imports
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 app = Flask(__name__)
 
-def f(x, expression):
+def safe_math_function(x, expression):
     """Safe evaluation of mathematical functions"""
     try:
-        # Allow basic mathematical operations
+        # Allowed mathematical functions
         allowed_names = {
-            'sin': math.sin, 'cos': math.cos, 'tan': math.tan,
-            'exp': math.exp, 'log': math.log, 'sqrt': math.sqrt,
-            'pi': math.pi, 'e': math.e
+            'sin': math.sin,
+            'cos': math.cos,
+            'tan': math.tan,
+            'asin': math.asin,
+            'acos': math.acos,
+            'atan': math.atan,
+            'sinh': math.sinh,
+            'cosh': math.cosh,
+            'tanh': math.tanh,
+            'exp': math.exp,
+            'log': math.log,
+            'log10': math.log10,
+            'sqrt': math.sqrt,
+            'abs': abs,
+            'pi': math.pi,
+            'e': math.e
         }
-        # Evaluate the expression
+        
+        # Check for dangerous patterns
+        dangerous = ['__', 'import', 'exec', 'eval', 'compile', 'open', 'file']
+        for pattern in dangerous:
+            if pattern in expression.lower():
+                return None
+        
+        # Evaluate safely
         result = eval(expression, {"__builtins__": {}}, {**allowed_names, 'x': x})
         return float(result)
-    except:
+    except Exception:
         return None
 
-def adaptive_simpson(a, b, f_expr, tol=1e-6, max_depth=15):
-    """
-    Adaptive Simpson quadrature implementation
-    """
-    def simpson_rule(a, b):
-        h = (b - a) / 2
-        return (h / 3) * (f(a, f_expr) + 4*f(a + h, f_expr) + f(b, f_expr))
+def adaptive_simpson_rule(a, b, f_expr, tol=1e-6, max_depth=15):
+    """Adaptive Simpson quadrature implementation"""
     
-    def adaptive_simpson_recursive(a, b, tol, depth):
+    def simpson(f, a, b):
+        h = (b - a) / 2
+        return (h / 3) * (f(a) + 4*f(a + h) + f(b))
+    
+    def recursive_simpson(a, b, tol, depth):
+        # Create function wrapper
+        def f_eval(x):
+            return safe_math_function(x, f_expr) or 0
+        
         m = (a + b) / 2
-        S = simpson_rule(a, b)
-        S_left = simpson_rule(a, m)
-        S_right = simpson_rule(m, b)
+        S = simpson(f_eval, a, b)
+        S_left = simpson(f_eval, a, m)
+        S_right = simpson(f_eval, m, b)
         
         if depth >= max_depth:
             return S_left + S_right
@@ -42,10 +68,13 @@ def adaptive_simpson(a, b, f_expr, tol=1e-6, max_depth=15):
         if error < tol:
             return S_left + S_right
         else:
-            return (adaptive_simpson_recursive(a, m, tol/2, depth+1) + 
-                    adaptive_simpson_recursive(m, b, tol/2, depth+1))
+            return (recursive_simpson(a, m, tol/2, depth+1) + 
+                    recursive_simpson(m, b, tol/2, depth+1))
     
-    return adaptive_simpson_recursive(a, b, tol, 0)
+    try:
+        return recursive_simpson(a, b, tol, 0)
+    except:
+        return None
 
 @app.route('/')
 def index():
@@ -61,10 +90,20 @@ def adaptive_simpson_route():
             function = request.form.get('function', 'x**2')
             tolerance = float(request.form.get('tolerance', 1e-6))
             
-            # Calculate result
-            result = adaptive_simpson(a, b, function, tolerance)
+            # Validate inputs
+            if a >= b:
+                return jsonify({'success': False, 'error': 'Lower limit must be less than upper limit'}), 400
             
-            # Calculate exact integral for comparison (if possible)
+            if tolerance <= 0 or tolerance > 1:
+                return jsonify({'success': False, 'error': 'Tolerance must be between 0 and 1'}), 400
+            
+            # Calculate result
+            result = adaptive_simpson_rule(a, b, function, tolerance)
+            
+            if result is None:
+                return jsonify({'success': False, 'error': 'Calculation failed. Check your function.'}), 400
+            
+            # Calculate exact integral for common functions
             exact = None
             if function == 'x**2':
                 exact = (b**3 - a**3) / 3
@@ -88,5 +127,8 @@ def adaptive_simpson_route():
 def examples():
     return render_template('examples.html')
 
+# This is required for Vercel
+app = app
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True)
